@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>نظام تتبع شاحنات الخرسانة</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+    <style>
+        :root { --main-color: #1a237e; }
+        body { background: #f8f9fa; font-family: 'Segoe UI', sans-serif; height: 100vh; margin: 0; }
+        .screen { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; z-index: 10; }
+        .active-screen { display: flex; }
+        .card-custom { background: white; padding: 30px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); width: 90%; max-width: 400px; text-align: center; }
+        #qrcode img { margin: 20px auto; border: 5px solid white; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        #map { height: 100vh; width: 100%; display: none; }
+        .top-nav { position: absolute; top: 15px; left: 15px; right: 15px; z-index: 1000; background: white; padding: 10px 20px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+    </style>
+</head>
+<body>
+
+<div id="eng-screen" class="screen active-screen">
+    <div class="card-custom">
+        <h4 class="fw-bold mb-3">لوحة المهندس</h4>
+        <input type="text" id="bus-id" class="form-control mb-3 text-center" placeholder="رقم الحافلة">
+        <button class="btn btn-primary w-100 fw-bold" onclick="generateAndListen()">توليد الكود والمراقبة</button>
+        <div id="qrcode" class="d-flex justify-content-center"></div>
+    </div>
+</div>
+
+<div id="drv-screen" class="screen">
+    <div class="card-custom">
+        <h4 class="fw-bold mb-3 text-primary">بدء التتبع</h4>
+        <p>بمجرد الضغط على الزر، سيتم مشاركة موقعك مع المهندس.</p>
+        <button class="btn btn-success w-100 fw-bold py-3" onclick="startGps()">أوافق - ابدأ الرحلة</button>
+    </div>
+</div>
+
+<div id="map-view" style="display:none;">
+    <div class="top-nav">
+        <span>تتبع الحافلة: <b id="active-id"></b></span>
+        <button class="btn btn-sm btn-danger" onclick="location.reload()">إنهاء</button>
+    </div>
+    <div id="map"></div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-database-compat.js"></script>
+
+<script>
+    // ⚠️ يجب وضع بياناتك هنا ليعمل الربط
+    const firebaseConfig = {
+        apiKey: "ضع_هنا_API_KEY",
+        databaseURL: "ضع_هنا_رابط_القاعدة"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    let map, marker, path;
+    const urlParams = new URLSearchParams(window.location.search);
+    const tripId = urlParams.get('id');
+
+    // إذا فتح السائق الرابط بوجود ID
+    if (tripId) {
+        document.getElementById('eng-screen').classList.remove('active-screen');
+        document.getElementById('drv-screen').classList.add('active-screen');
+    }
+
+    function generateAndListen() {
+        const id = document.getElementById('bus-id').value;
+        if (!id) return alert("أدخل رقم الحافلة");
+
+        // إنشاء الرابط ليكون صالحاً عند السائق
+        const url = window.location.href.split('?')[0] + "?id=" + id;
+        
+        document.getElementById('qrcode').innerHTML = "";
+        new QRCode(document.getElementById("qrcode"), { text: url, width: 200, height: 200 });
+
+        // الاستماع للبيانات
+        db.ref('tracking/' + id).on('value', snap => {
+            const data = snap.val();
+            if (data) showMap(id, data);
+        });
+    }
+
+    function showMap(id, data) {
+        document.getElementById('eng-screen').style.display = 'none';
+        document.getElementById('map-view').style.display = 'block';
+        document.getElementById('map').style.display = 'block';
+        document.getElementById('active-id').innerText = id;
+
+        if (!map) {
+            map = L.map('map').setView([data.lat, data.lng], 15);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+            marker = L.marker([data.lat, data.lng]).addTo(map);
+            path = L.polyline([], {color: 'blue'}).addTo(map);
+        }
+        marker.setLatLng([data.lat, data.lng]);
+        path.addLatLng([data.lat, data.lng]);
+        map.panTo([data.lat, data.lng]);
+    }
+
+    function startGps() {
+        if (navigator.geolocation) {
+            navigator.geolocation.watchPosition(pos => {
+                db.ref('tracking/' + tripId).set({
+                    lat: pos.coords.latitude,
+                    lng: pos.coords.longitude,
+                    time: Date.now()
+                });
+                document.querySelector('#drv-screen h4').innerText = "جاري الإرسال...";
+            }, err => alert("يرجى تفعيل الـ GPS"), { enableHighAccuracy: true });
+        }
+    }
+</script>
+</body>
+</html>
